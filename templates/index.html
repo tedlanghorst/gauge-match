@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MERIT Hydro Matcher</title>
+    <style>
+        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; }
+        #sidebar { width: 40%; padding: 20px; overflow-y: auto; }
+        #map-container { width: 60%; height: 100vh; }
+        #map-container .folium-map { width: 100%; height: 100%; }
+        h1, h2, h3 { color: #333; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .form-options { margin: 20px 0; }
+        .form-options label { display: block; margin: 10px 0; font-size: 1.1em; }
+        .gmaps-link {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 15px;
+            background-color: #4285F4;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+        .color-box {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            margin-right: 6px;
+        }
+        .progress-bar {
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .progress-bar-fill {
+            height: 25px;
+            background-color: #4CAF50;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .progress-text {
+            margin-top: 5px;
+            font-size: 0.9em;
+            color: #666;
+        }
+        .comments-box {
+            width: 100%;
+            min-height: 60px;
+            padding: 8px;
+            margin: 10px 0;
+            font-family: sans-serif;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .btn-primary {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .btn-secondary {
+            background-color: #2196F3;
+            color: white;
+        }
+        .btn-warning {
+            background-color: #ff9800;
+            color: white;
+        }
+        .jump-to-form {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+        .jump-to-form input {
+            padding: 8px;
+            width: 200px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .positive-diff { color: #d32f2f; }
+        .negative-diff { color: #388e3c; }
+        .editing-notice {
+            background-color: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border-left: 4px solid #ffc107;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h1>Gauge to MERIT Matcher</h1>
+        
+        <!-- Progress Bar -->
+        <div class="progress-bar">
+            <div class="progress-bar-fill" style="width: {{ progress.percent }}%;">
+                {{ progress.percent }}%
+            </div>
+            <div class="progress-text">
+                {{ progress.matched }} of {{ progress.total }} matched ({{ progress.remaining }} remaining)
+            </div>
+        </div>
+
+        {% if is_editing %}
+        <div class="editing-notice">
+            <strong>⚠️ Editing Mode:</strong> You are editing a previous match. Your changes will update the existing entry.
+        </div>
+        {% endif %}
+        
+        <h2>Current Gauge: {{ gauge_id }}</h2>
+        <a href="{{ gmaps_link }}" class="gmaps-link" target="_blank">Open in Google Maps</a>
+        
+        <h3>Gauge Properties</h3>
+        <ul>
+            <li><b>ID:</b> {{ gauge_id }}</li>
+            <li><b>Name:</b> {{ gauge.get('name', 'N/A') }}</li>
+            <li><b>Reported Area:</b> {{ gauge_area }}</li>
+        </ul>
+        
+        <hr>
+
+        <h3>Potential MERIT Matches</h3>
+        <form action="/submit" method="POST" class="form-options">
+            <input type="hidden" name="gauge_id" value="{{ gauge_id }}">
+            <input type="hidden" name="is_editing" value="{{ 'true' if is_editing else 'false' }}">
+            
+            {% if candidates %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Select</th>
+                            <th>MERIT ID</th>
+                            <th>Area (km²)</th>
+                            <th>% Diff</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in candidates %}
+                        <tr style="background-color: {{ c.color }}33;">
+                            <td>
+                                <input type="radio" name="selection" value="{{ c.id }}" 
+                                    {% if existing_selection and existing_selection == c.id %}checked
+                                    {% elif not existing_selection and candidates|length == 1 %}checked
+                                    {% endif %}
+                                    required>
+                            </td>
+                            <td>
+                                <div class="color-box" style="background-color: {{ c.color }};"></div>
+                                {{ c.id }}
+                            </td>
+                            <td>{{ c.area }}</td>
+                            <td>
+                                {% if c.area_diff is not none %}
+                                    <span class="{% if c.area_diff > 0 %}positive-diff{% else %}negative-diff{% endif %}">
+                                        {{ '%+.1f' | format(c.area_diff) }}%
+                                    </span>
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <hr>
+                <label>
+                    <input type="radio" name="selection" value="NONE" 
+                        {% if existing_selection == 'NONE' %}checked{% endif %}
+                        {% if not existing_selection %}required{% endif %}>
+                    <b>None of these are correct</b>
+                </label>
+            {% else %}
+                <p>No candidates found within the search buffer.</p>
+                <label>
+                    <input type="radio" name="selection" value="NO_CANDIDATES" checked>
+                    <b>No Candidates Found</b>
+                </label>
+            {% endif %}
+            
+            <label>
+                <input type="radio" name="selection" value="SKIP" 
+                    {% if existing_selection == 'SKIP' %}checked{% endif %}
+                    {% if not existing_selection %}required{% endif %}>
+                <b>Skip this gauge for now</b>
+            </label>
+            
+            <hr>
+            
+            <label for="comments"><b>Comments (optional):</b></label>
+            <textarea name="comments" id="comments" class="comments-box" placeholder="Add any notes about this match...">{{ existing_comment }}</textarea>
+            
+            <div class="button-row">
+                <button type="submit" class="btn btn-primary">
+                    {% if is_editing %}Update Match{% else %}Save and Next{% endif %}
+                </button>
+                
+                {% if not is_editing %}
+                <button type="button" class="btn btn-secondary" onclick="window.location.href='/?back=true'">
+                    ← Back
+                </button>
+                {% endif %}
+            </div>
+        </form>
+
+        <!-- Jump To Section -->
+        <div class="jump-to-form">
+            <h4>Jump to Specific Gauge:</h4>
+            <form action="/" method="GET" style="display: flex; gap: 10px;">
+                <input type="text" name="jump_to" placeholder="Enter site_id" required>
+                <button type="submit" class="btn btn-warning">Jump</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="map-container">
+        {{ map_html|safe }}
+    </div>
+
+</body>
+</html>
