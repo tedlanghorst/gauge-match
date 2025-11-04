@@ -108,13 +108,38 @@
             margin-bottom: 15px;
             border-left: 4px solid #ffc107;
         }
+        .keyboard-shortcuts {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e3f2fd;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        .keyboard-shortcuts h4 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+        .keyboard-shortcuts code {
+            background-color: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        .shortcut-indicator {
+            display: inline-block;
+            background-color: #1976d2;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-left: 8px;
+        }
     </style>
 </head>
 <body>
 
     <div id="sidebar">
-        <h1>Gauge to MERIT Matcher</h1>
-        
         <!-- Progress Bar -->
         <div class="progress-bar">
             <div class="progress-bar-fill" style="width: {{ progress.percent }}%;">
@@ -131,7 +156,6 @@
         </div>
         {% endif %}
         
-        <h2>Current Gauge: {{ gauge_id }}</h2>
         <a href="{{ gmaps_link }}" class="gmaps-link" target="_blank">Open in Google Maps</a>
         
         <h3>Gauge Properties</h3>
@@ -139,12 +163,13 @@
             <li><b>ID:</b> {{ gauge_id }}</li>
             <li><b>Name:</b> {{ gauge.get('name', 'N/A') }}</li>
             <li><b>Reported Area:</b> {{ gauge_area }}</li>
+            <li><b>Mean Discharge (m³/s):</b> {{ gauge_discharge }}</li>
         </ul>
         
         <hr>
 
         <h3>Potential MERIT Matches</h3>
-        <form action="/submit" method="POST" class="form-options">
+        <form action="/submit" method="POST" class="form-options" id="matchForm">
             <input type="hidden" name="gauge_id" value="{{ gauge_id }}">
             <input type="hidden" name="is_editing" value="{{ 'true' if is_editing else 'false' }}">
             
@@ -152,21 +177,25 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>Select</th>
+                            <th>Key</th>
                             <th>MERIT ID</th>
                             <th>Area (km²)</th>
                             <th>% Diff</th>
+                            <th>Runoff (mm/yr)</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for c in candidates %}
-                        <tr style="background-color: {{ c.color }}33;">
+                        <tr style="background-color: {{ c.color }}33;" data-shortcut="{{ loop.index }}">
                             <td>
-                                <input type="radio" name="selection" value="{{ c.id }}" 
+                                <input type="radio" name="selection" value="{{ c.id }}" id="candidate_{{ loop.index }}"
                                     {% if existing_selection and existing_selection == c.id %}checked
-                                    {% elif not existing_selection and candidates|length == 1 %}checked
+                                    {% elif not existing_selection and loop.first %}checked
                                     {% endif %}
-                                    required>
+                                    >
+                                <label for="candidate_{{ loop.index }}">
+                                    <span class="shortcut-indicator">{{ loop.index }}</span>
+                                </label>
                             </td>
                             <td>
                                 <div class="color-box" style="background-color: {{ c.color }};"></div>
@@ -182,30 +211,33 @@
                                     N/A
                                 {% endif %}
                             </td>
+                            <td>{{ c.runoff }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
                 <hr>
                 <label>
-                    <input type="radio" name="selection" value="NONE" 
+                    <input type="radio" name="selection" value="NONE" id="none_option"
                         {% if existing_selection == 'NONE' %}checked{% endif %}
                         {% if not existing_selection %}required{% endif %}>
                     <b>None of these are correct</b>
+                    <span class="shortcut-indicator">N</span>
                 </label>
             {% else %}
                 <p>No candidates found within the search buffer.</p>
                 <label>
-                    <input type="radio" name="selection" value="NO_CANDIDATES" checked>
+                    <input type="radio" name="selection" value="NO_CANDIDATES" id="no_candidates_option" checked>
                     <b>No Candidates Found</b>
                 </label>
             {% endif %}
             
             <label>
-                <input type="radio" name="selection" value="SKIP" 
+                <input type="radio" name="selection" value="SKIP" id="skip_option"
                     {% if existing_selection == 'SKIP' %}checked{% endif %}
-                    {% if not existing_selection %}required{% endif %}>
+                >
                 <b>Skip this gauge for now</b>
+                <span class="shortcut-indicator">S</span>
             </label>
             
             <hr>
@@ -216,15 +248,29 @@
             <div class="button-row">
                 <button type="submit" class="btn btn-primary">
                     {% if is_editing %}Update Match{% else %}Save and Next{% endif %}
+                    <span class="shortcut-indicator">Enter</span>
                 </button>
                 
                 {% if not is_editing %}
                 <button type="button" class="btn btn-secondary" onclick="window.location.href='/?back=true'">
                     ← Back
+                    <span class="shortcut-indicator">B</span>
                 </button>
                 {% endif %}
             </div>
         </form>
+
+        <!-- Keyboard Shortcuts Help -->
+        <div class="keyboard-shortcuts">
+            <h4>⌨️ Keyboard Shortcuts</h4>
+            <ul style="margin: 5px 0; padding-left: 20px;">
+                <li><code>1-9</code>: Select candidate by number</li>
+                <li><code>N</code>: None of these are correct</li>
+                <li><code>S</code>: Skip this gauge</li>
+                <li><code>Enter</code>: Submit (when not in comment field)</li>
+                <li><code>B</code>: Go back to previous</li>
+            </ul>
+        </div>
 
         <!-- Jump To Section -->
         <div class="jump-to-form">
@@ -239,6 +285,70 @@
     <div id="map-container">
         {{ map_html|safe }}
     </div>
+
+    <script>
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Don't trigger shortcuts if user is typing in a text input or textarea
+            if (e.target.tagName === 'INPUT' && e.target.type === 'text') {
+                return;
+            }
+            if (e.target.tagName === 'TEXTAREA' && e.key !== 'Enter') {
+                return;
+            }
+
+            // Number keys (1-9) for selecting candidates
+            if (e.key >= '1' && e.key <= '9') {
+                e.preventDefault();
+                const candidateNum = parseInt(e.key);
+                const radio = document.getElementById('candidate_' + candidateNum);
+                if (radio) {
+                    radio.checked = true;
+                    // Flash the row to show selection
+                    const row = radio.closest('tr');
+                    if (row) {
+                        row.style.transition = 'background-color 0.2s';
+                        const originalBg = row.style.backgroundColor;
+                        row.style.backgroundColor = '#ffeb3b';
+                        setTimeout(() => row.style.backgroundColor = originalBg, 200);
+                    }
+                }
+            }
+            
+            // N for "None of these are correct"
+            if (e.key.toLowerCase() === 'n' && e.target.id !== 'comments') {
+                e.preventDefault();
+                const noneRadio = document.getElementById('none_option');
+                if (noneRadio) {
+                    noneRadio.checked = true;
+                }
+            }
+            
+            // S for "Skip"
+            if (e.key.toLowerCase() === 's' && e.target.id !== 'comments') {
+                e.preventDefault();
+                const skipRadio = document.getElementById('skip_option');
+                if (skipRadio) {
+                    skipRadio.checked = true;
+                }
+            }
+            
+            // Enter to submit (only if not in textarea)
+            if (e.key === 'Enter' && e.target.id !== 'comments') {
+                e.preventDefault();
+                document.getElementById('matchForm').submit();
+            }
+            
+            // B for Back
+            if (e.key.toLowerCase() === 'b' && e.target.id !== 'comments') {
+                e.preventDefault();
+                const backButton = document.querySelector('.btn-secondary');
+                if (backButton) {
+                    window.location.href = '/?back=true';
+                }
+            }
+        });
+    </script>
 
 </body>
 </html>

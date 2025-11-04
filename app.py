@@ -14,7 +14,11 @@ from flask import Flask, render_template, request, redirect, url_for
 
 
 # --- Configuration & Setup ---
-# # 1. Data paths
+
+USE_MOCK_DATA = False  # <-- set to False when you want to load the real datasets
+
+
+# 1. Data paths
 GAUGE_FILE = Path("./data/gauges.gpkg")
 MATCH_FILE = Path("./data/matches.csv")
 BACKUP_DIR = Path("./data/backups")
@@ -22,12 +26,14 @@ MERIT_DIR = Path("/Users/Ted/Documents/MERIT-BASINS/")
 
 # 2. Define key column names
 GAUGE_ID_COL = "site_id"        
-GAUGE_AREA_COL = "area" 
 MERIT_ID_COL = "COMID" 
 MERIT_AREA_COL = "uparea"  
+GAUGE_AREA_COL = "area" 
+GAUGE_DISCHARGE_COL = "mean_discharge" 
 
 # 3. Define search parameters
-SEARCH_BUFFER_METERS = 2000 # Buffer around gauge to find candidates (in meters)
+SEARCH_BUFFER_METERS = 5000 # Buffer around gauge to find candidates (in meters)
+AREA_TOLERANCE_PERCENT = 10  # Filter candidates within this % of gauge area
 
 # 4. Backup settings
 BACKUP_INTERVAL = 10  # Create backup every N submissions
@@ -64,7 +70,7 @@ try:
     # Reproject copies to WGS84 (EPSG:4326) for Folium mapping
     gdf_gauges_wgs84 = gdf_gauges.to_crs(epsg=4326)
     gdf_merit_wgs84 = gdf_merit.to_crs(epsg=4326)
-
+    
     print("Data loaded successfully.")
 
 except Exception as e:
@@ -149,10 +155,30 @@ def calculate_area_diff(gauge_area, merit_area):
             return round(diff, 1)
     except (ValueError, TypeError, ZeroDivisionError):
         pass
-    return None
+    return -1
+
+def calculate_runoff(discharge_m3s, area_km2):
+    """Calculates runoff in mm/yr from discharge (m3/s) and area (km2)."""
+    try:
+        discharge = float(discharge_m3s)
+        area = float(area_km2)
+        
+        if area > 0 and discharge >= 0:
+            # 1. Convert discharge from m3/s to m3/yr
+            seconds_per_year = 60 * 60 * 24 * 365.25
+            volume_m3_per_year = discharge * seconds_per_year
+            # 2. Convert area from km2 to m2
+            area_m2 = area * 1_000_000
+            # 3. Calculate runoff depth in m/yr
+            runoff_m_per_year = volume_m3_per_year / area_m2
+            # 4. Convert to mm/yr and round
+            return round(runoff_m_per_year * 1000, 1)
+    except (ValueError, TypeError, ZeroDivisionError, AttributeError):
+        pass
+    return -1
 
 def get_candidates(gauge_geom):
-    """Finds MERIT polygons that intersect a buffer around the gauge geometry."""
+    """Finds MERIT polygons that intersect a buffer around the gauge geometry, sorted by distance."""
     buffer = gauge_geom.buffer(SEARCH_BUFFER_METERS)
     
     # Use spatial index to find possible matches
@@ -164,16 +190,45 @@ def get_candidates(gauge_geom):
     # Get the actual candidates and perform a precise intersection
     possible_matches = gdf_merit.iloc[possible_matches_idx]
     candidates = possible_matches[possible_matches.intersects(buffer)].copy()
+    
+    # Calculate distance from gauge point to each candidate
+    if not candidates.empty:
+        candidates['distance_to_gauge'] = candidates.geometry.distance(gauge_geom)
+        candidates = candidates.sort_values('distance_to_gauge')
+    
     return candidates
 
 
-def create_map(gauge_wgs84, candidates_wgs84, candidate_list):
-    """Creates a Folium map with the gauge, candidates, and layers."""
+def create_map(gauge_wgs84, candidates_wgs84, candidate_list, all_merit_nearby_wgs84):
+    """Creates a Folium map with the gauge, candidates, all nearby MERIT polygons, and layers."""
 
     center_lat = gauge_wgs84.geometry.y
     center_lon = gauge_wgs84.geometry.x
     m = folium.Map(location=[center_lat, center_lon], zoom_start=14)
-    folium.TileLayer("OpenStreetMap").add_to(m)
+    
+    # Add base layers
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri",
+        name="Satellite",
+        overlay=False,
+        control=True
+    ).add_to(m)
+    folium.TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
+
+    # Add all nearby MERIT polygons as background (thin grey lines)
+    if not all_merit_nearby_wgs84.empty:
+        folium.GeoJson(
+            all_merit_nearby_wgs84,
+            style_function=lambda x: {
+                "fillColor":  "#999999",
+                "color": "#999999",
+                "weight": 2,
+                "fillOpacity": 0,
+                "opacity": 0.5,
+            },
+            name="All MERIT Basins (nearby)"
+        ).add_to(m)
 
     # Add gauge
     folium.Marker(
@@ -192,7 +247,7 @@ def create_map(gauge_wgs84, candidates_wgs84, candidate_list):
             return {
                 "fillColor": color,
                 "color": color,
-                "weight": 4,  # Increased from 2 to 4
+                "weight": 4, 
                 "fillOpacity": 0.5,
             }
 
@@ -223,6 +278,7 @@ def create_map(gauge_wgs84, candidates_wgs84, candidate_list):
             style_function=style_function,
             highlight_function=highlight_function,
             tooltip=tooltip,
+            name="Candidate Matches"
         )
 
         gjson.add_to(m)
@@ -268,25 +324,40 @@ def index():
     # 3. Get WGS84 versions for mapping
     gauge_wgs84 = gdf_gauges_wgs84[gdf_gauges_wgs84[GAUGE_ID_COL] == gauge[GAUGE_ID_COL]].iloc[0]
     
+    # Get nearby MERIT polygons for context (larger buffer)
+    context_buffer = gauge.geometry.buffer(SEARCH_BUFFER_METERS * 3)
+    context_idx = list(gdf_merit.sindex.intersection(context_buffer.bounds))
+    if context_idx:
+        all_merit_nearby = gdf_merit.iloc[context_idx]
+        all_merit_nearby_ids = all_merit_nearby[MERIT_ID_COL].tolist()
+        all_merit_nearby_wgs84 = gdf_merit_wgs84[gdf_merit_wgs84[MERIT_ID_COL].isin(all_merit_nearby_ids)]
+    else:
+        all_merit_nearby_wgs84 = gpd.GeoDataFrame(columns=gdf_merit_wgs84.columns, crs=gdf_merit_wgs84.crs)
+    
     if not candidates.empty:
          candidate_ids = candidates[MERIT_ID_COL].tolist()
          candidates_wgs84 = gdf_merit_wgs84[gdf_merit_wgs84[MERIT_ID_COL].isin(candidate_ids)]
+         # Preserve the sort order from candidates
+         candidates_wgs84 = candidates_wgs84.set_index(MERIT_ID_COL).loc[candidate_ids].reset_index()
     else:
         candidates_wgs84 = gpd.GeoDataFrame(columns=gdf_merit.columns, crs=gdf_merit_wgs84.crs)
 
     # 4. Prepare candidate data for the template
     colors = [mcolors.rgb2hex(cm.tab10(i % 10)) for i in range(len(candidates))]
     gauge_area = gauge.get(GAUGE_AREA_COL, None)
+    gauge_discharge = gauge.get(GAUGE_DISCHARGE_COL, None)
 
     candidate_list = []
     for i, (_, row) in enumerate(candidates.iterrows()):
-        merit_area = row.get(MERIT_AREA_COL, None)
-        area_diff = calculate_area_diff(gauge_area, merit_area) if gauge_area and merit_area else None
-        
+        merit_area = row.get(MERIT_AREA_COL, 0)
+        area_diff = calculate_area_diff(gauge_area, merit_area)
+        runoff_mm_yr = calculate_runoff(gauge_discharge, merit_area)
+
         candidate_list.append({
             "id": row[MERIT_ID_COL],
-            "area": merit_area if merit_area is not None else 'N/A',
-            "area_diff": area_diff,
+            "area": round(merit_area, 0),
+            "area_diff": round(area_diff, 2),
+            "runoff": round(runoff_mm_yr, 2),
             "color": colors[i],
             "other_prop": row.get("other_merit_prop", "N/A")
         })
@@ -297,7 +368,7 @@ def index():
     gmaps_link = f"https://www.google.com/maps/@{lat},{lon},15z/data=!3m1!1e3"
 
     # 6. Create the Folium map
-    map_html = create_map(gauge_wgs84, candidates_wgs84, candidate_list)
+    map_html = create_map(gauge_wgs84, candidates_wgs84, candidate_list, all_merit_nearby_wgs84)
 
     # 7. Get progress stats
     progress = get_progress_stats()
@@ -317,6 +388,7 @@ def index():
         gauge=gauge.to_dict(),
         gauge_id=gauge[GAUGE_ID_COL],
         gauge_area=gauge_area if gauge_area is not None else "N/A",
+        gauge_discharge=gauge_discharge if gauge_discharge is not None else "N/A",
         candidates=candidate_list,
         gmaps_link=gmaps_link,
         map_html=map_html,
