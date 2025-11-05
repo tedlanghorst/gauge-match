@@ -32,7 +32,7 @@ MERIT_AREA_COL = "uparea"
 GAUGE_AREA_COL = "area" 
 GAUGE_DISCHARGE_COL = "mean_discharge" 
 
-SEARCH_BUFFER_METERS = 2000 # Buffer around gauge to find candidates (in meters)
+SEARCH_BUFFER_METERS = 5000 # Buffer around gauge to find candidates (in meters)
 AREA_TOLERANCE_PERCENT = 100  #Filter candidates within this pct of gauge area
 AREA_AUTO_MATCH_PERCENT = 10 # Automatically match reaches by area if less than this pct
 
@@ -152,8 +152,9 @@ def calculate_area_diff(gauge_area, merit_area):
     try:
         gauge_area = float(gauge_area)
         merit_area = float(merit_area)
+        mean_area = (gauge_area + merit_area) / 2
         if gauge_area > 0:
-            diff = ((merit_area - gauge_area) / gauge_area)* 100
+            diff = ((merit_area - gauge_area) / mean_area)* 100
             return round(diff, 1)
     except (ValueError, TypeError, ZeroDivisionError):
         pass
@@ -204,17 +205,17 @@ def get_candidates(gauge_geom, gauge_area=None):
     if candidates.empty:
         return candidates, "NO_CANDIDATES"
     
-    # Filter by area if gauge area is available and valid
-    if gauge_area is not None and gauge_area > 0:
-        lower_bound = gauge_area * (1 - AREA_TOLERANCE_PERCENT / 100)
-        upper_bound = gauge_area * (1 + AREA_TOLERANCE_PERCENT / 100)
-        candidates = candidates[
-            (candidates[MERIT_AREA_COL] >= lower_bound) & 
-            (candidates[MERIT_AREA_COL] <= upper_bound)
-        ].copy()
+    # # Filter by area if gauge area is available and valid
+    # if gauge_area is not None and gauge_area > 0:
+    #     lower_bound = gauge_area * (1 - AREA_TOLERANCE_PERCENT / 100)
+    #     upper_bound = gauge_area * (1 + AREA_TOLERANCE_PERCENT / 100)
+    #     candidates = candidates[
+    #         (candidates[MERIT_AREA_COL] >= lower_bound) & 
+    #         (candidates[MERIT_AREA_COL] <= upper_bound)
+    #     ].copy()
         
-        if candidates.empty:
-            return candidates, f"NO_CANDIDATES_BY_AREA"
+    #     if candidates.empty:
+    #         return candidates, f"NO_CANDIDATES_BY_AREA"
     
     # Calculate distance from gauge point to each candidate
     if not candidates.empty:
