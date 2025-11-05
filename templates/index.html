@@ -201,7 +201,7 @@
                                 <div class="color-box" style="background-color: {{ c.color }};"></div>
                                 {{ c.id }}
                             </td>
-                            <td>{{ c.area }}</td>
+                            <td>{{ c.area|round(0) if c.area is not none else "N/A" }}</td>
                             <td>
                                 {% if c.area_diff is not none %}
                                     <span class="{% if c.area_diff > 0 %}positive-diff{% else %}negative-diff{% endif %}">
@@ -211,7 +211,7 @@
                                     N/A
                                 {% endif %}
                             </td>
-                            <td>{{ c.runoff }}</td>
+                            <td>{{ c.runoff|round(1) if c.runoff is not none else "N/A" }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -221,7 +221,7 @@
                     <input type="radio" name="selection" value="NONE" id="none_option"
                         {% if existing_selection == 'NONE' %}checked{% endif %}
                         {% if not existing_selection %}required{% endif %}>
-                    <b>None of these are correct</b>
+                    <b>No match</b>
                     <span class="shortcut-indicator">N</span>
                 </label>
             {% else %}
@@ -236,7 +236,7 @@
                 <input type="radio" name="selection" value="SKIP" id="skip_option"
                     {% if existing_selection == 'SKIP' %}checked{% endif %}
                 >
-                <b>Skip this gauge for now</b>
+                <b>Skip</b>
                 <span class="shortcut-indicator">S</span>
             </label>
             

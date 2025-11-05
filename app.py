@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 
+import numpy as np
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import pandas as pd
@@ -18,25 +19,24 @@ from flask import Flask, render_template, request, redirect, url_for
 USE_MOCK_DATA = False  # <-- set to False when you want to load the real datasets
 
 
-# 1. Data paths
+# Data paths
 GAUGE_FILE = Path("./data/gauges.gpkg")
 MATCH_FILE = Path("./data/matches.csv")
 BACKUP_DIR = Path("./data/backups")
 MERIT_DIR = Path("/Users/Ted/Documents/MERIT-BASINS/")
 
-# 2. Define key column names
+# Define key column names
 GAUGE_ID_COL = "site_id"        
 MERIT_ID_COL = "COMID" 
 MERIT_AREA_COL = "uparea"  
 GAUGE_AREA_COL = "area" 
 GAUGE_DISCHARGE_COL = "mean_discharge" 
 
-# 3. Define search parameters
-SEARCH_BUFFER_METERS = 5000 # Buffer around gauge to find candidates (in meters)
-AREA_TOLERANCE_PERCENT = 10  # Filter candidates within this % of gauge area
+SEARCH_BUFFER_METERS = 2000 # Buffer around gauge to find candidates (in meters)
+AREA_TOLERANCE_PERCENT = 100  #Filter candidates within this pct of gauge area
+AREA_AUTO_MATCH_PERCENT = 10 # Automatically match reaches by area if less than this pct
 
-# 4. Backup settings
-BACKUP_INTERVAL = 10  # Create backup every N submissions
+BACKUP_INTERVAL = 50 
 
 # 5. Initialize Flask App
 app = Flask(__name__)
@@ -51,9 +51,10 @@ try:
     gdf_gauges = gpd.read_file(GAUGE_FILE)
 
     merit_gdfs = []
-    for b in tqdm(range(1,10)):
+    for b in tqdm(range(1,10), desc="Loading MERIT files"):
         filename = MERIT_DIR / f"riv_pfaf_{b}_MERIT_Hydro_v07_Basins_v01_bugfix1.shp"
         merit_gdfs.append(gpd.read_file(filename))
+    print("Concatenating MERIT dataframes")
     gdf_merit = gpd.GeoDataFrame(pd.concat(merit_gdfs))
 
     # Ensure data is in a projected CRS for accurate buffering
@@ -146,19 +147,21 @@ def get_previous_gauge():
     return None
 
 def calculate_area_diff(gauge_area, merit_area):
-    """Calculates the percentage difference between gauge and MERIT areas."""
+    """Calculates the percentage difference between gauge and MERIT areas.
+    Returns None if calculation cannot be performed."""
     try:
         gauge_area = float(gauge_area)
         merit_area = float(merit_area)
         if gauge_area > 0:
-            diff = ((merit_area - gauge_area) / gauge_area) * 100
+            diff = ((merit_area - gauge_area) / gauge_area)* 100
             return round(diff, 1)
     except (ValueError, TypeError, ZeroDivisionError):
         pass
-    return -1
+    return None
 
 def calculate_runoff(discharge_m3s, area_km2):
-    """Calculates runoff in mm/yr from discharge (m3/s) and area (km2)."""
+    """Calculates runoff in mm/yr from discharge (m3/s) and area (km2).
+    Returns None if calculation cannot be performed."""
     try:
         discharge = float(discharge_m3s)
         area = float(area_km2)
@@ -175,28 +178,50 @@ def calculate_runoff(discharge_m3s, area_km2):
             return round(runoff_m_per_year * 1000, 1)
     except (ValueError, TypeError, ZeroDivisionError, AttributeError):
         pass
-    return -1
+    return None
 
-def get_candidates(gauge_geom):
-    """Finds MERIT polygons that intersect a buffer around the gauge geometry, sorted by distance."""
+def get_candidates(gauge_geom, gauge_area=None):
+    """Finds MERIT polygons that intersect a buffer around the gauge geometry, sorted by distance.
+    If gauge_area is provided, filters candidates to within AREA_TOLERANCE_PERCENT.
+    
+    Returns:
+        tuple: (candidates_gdf, skip_reason)
+            - candidates_gdf: GeoDataFrame of matching candidates
+            - skip_reason: None if candidates found, or string explaining why no candidates
+    """
     buffer = gauge_geom.buffer(SEARCH_BUFFER_METERS)
     
     # Use spatial index to find possible matches
     possible_matches_idx = list(gdf_merit.sindex.intersection(buffer.bounds))
     
     if not possible_matches_idx:
-        return gpd.GeoDataFrame(columns=gdf_merit.columns, crs=gdf_merit.crs)
+        return gpd.GeoDataFrame(columns=gdf_merit.columns, crs=gdf_merit.crs), "NO_CANDIDATES"
         
     # Get the actual candidates and perform a precise intersection
     possible_matches = gdf_merit.iloc[possible_matches_idx]
     candidates = possible_matches[possible_matches.intersects(buffer)].copy()
+    
+    if candidates.empty:
+        return candidates, "NO_CANDIDATES"
+    
+    # Filter by area if gauge area is available and valid
+    if gauge_area is not None and gauge_area > 0:
+        lower_bound = gauge_area * (1 - AREA_TOLERANCE_PERCENT / 100)
+        upper_bound = gauge_area * (1 + AREA_TOLERANCE_PERCENT / 100)
+        candidates = candidates[
+            (candidates[MERIT_AREA_COL] >= lower_bound) & 
+            (candidates[MERIT_AREA_COL] <= upper_bound)
+        ].copy()
+        
+        if candidates.empty:
+            return candidates, f"NO_CANDIDATES_BY_AREA"
     
     # Calculate distance from gauge point to each candidate
     if not candidates.empty:
         candidates['distance_to_gauge'] = candidates.geometry.distance(gauge_geom)
         candidates = candidates.sort_values('distance_to_gauge')
     
-    return candidates
+    return candidates, None
 
 
 def create_map(gauge_wgs84, candidates_wgs84, candidate_list, all_merit_nearby_wgs84):
@@ -287,6 +312,57 @@ def create_map(gauge_wgs84, candidates_wgs84, candidate_list, all_merit_nearby_w
     return m._repr_html_()
 
 
+def auto_record_no_match(gauge_id, reason):
+    """Automatically records a 'None' match with a reason."""
+    new_match = {
+        GAUGE_ID_COL: [gauge_id],
+        MERIT_ID_COL: ["None"],
+        "comments": [reason]
+    }
+    df_new = pd.DataFrame(new_match)
+    
+    # Check if file exists and has content
+    file_exists = MATCH_FILE.is_file() and os.path.getsize(MATCH_FILE) > 0
+    
+    if file_exists:
+        df_existing = get_matched_data()
+        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+        df_combined.to_csv(MATCH_FILE, mode='w', header=True, index=False)
+    else:
+        df_new.to_csv(MATCH_FILE, mode='w', header=True, index=False)
+    
+    # Create backup periodically
+    df_all = get_matched_data()
+    if len(df_all) % BACKUP_INTERVAL == 0:
+        create_backup()
+
+def auto_record_match(gauge_id, merit_id, reason):
+    """Automatically records a successful match with a reason."""
+    new_match = {
+        GAUGE_ID_COL: [gauge_id],
+        MERIT_ID_COL: [merit_id], # <-- Use the provided merit_id
+        "comments": [reason]
+    }
+    df_new = pd.DataFrame(new_match)
+    
+    # Check if file exists and has content
+    file_exists = MATCH_FILE.is_file() and os.path.getsize(MATCH_FILE) > 0
+    
+    if file_exists:
+        df_existing = get_matched_data()
+        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+        df_combined.to_csv(MATCH_FILE, mode='w', header=True, index=False)
+    else:
+        df_new.to_csv(MATCH_FILE, mode='w', header=True, index=False)
+    
+    # Create backup periodically
+    df_all = get_matched_data()
+    if len(df_all) % BACKUP_INTERVAL == 0:
+        create_backup()
+    
+    print(f"Auto-recorded match for {gauge_id}: {merit_id} ({reason})")
+
+
 # --- Flask Routes ---
 
 @app.route("/")
@@ -297,10 +373,16 @@ def index():
     jump_to = request.args.get('jump_to')
     go_back = request.args.get('back')
     
+    gauge = None
+    existing_match = None
+    candidates = None
+    gauge_area = None
+    
     if jump_to:
         gauge = get_gauge_by_id(jump_to)
         if gauge is None:
             return f"<h1>Gauge ID '{jump_to}' not found!</h1><a href='/'>Go back</a>"
+        existing_match = None
     elif go_back:
         prev_id = get_previous_gauge()
         if prev_id:
@@ -311,16 +393,69 @@ def index():
         else:
             return "<h1>No previous gauge to go back to!</h1><a href='/'>Go back</a>"
     else:
-        gauge = get_next_unmatched_gauge()
-        existing_match = None
-    
-    if gauge is None:
-        stats = get_progress_stats()
-        return f"<h1>All {stats['total']} gauges have been matched!</h1>"
+        # This is the "find next" path.
+        # Loop until we find a gauge that needs manual review.
+        while True:
+            gauge = get_next_unmatched_gauge()
+            existing_match = None
+            
+            if gauge is None:
+                stats = get_progress_stats()
+                return f"<h1>All {stats['total']} gauges have been matched!</h1>"
 
-    # 2. Find potential candidates in the MERIT dataset
-    candidates = get_candidates(gauge.geometry)
-    
+            # Get gauge area for filtering
+            gauge_area = gauge.get(GAUGE_AREA_COL, None)
+            
+            # 2. Find potential candidates in the MERIT dataset
+            candidates, skip_reason = get_candidates(gauge.geometry, gauge_area)
+            
+            # AUTO-SKIP: If no candidates found, record and move to next
+            if candidates.empty and skip_reason:
+                auto_record_no_match(gauge[GAUGE_ID_COL], f"Auto-skipped: {skip_reason}")
+                continue  # <-- REPLACED REDIRECT
+
+            # AUTO-MATCH: If we have gauge area we can attempt auto matching
+            if gauge_area and gauge_area > 0 and not candidates.empty:
+                candidates['area_diff_percent'] = candidates.apply(
+                    lambda row: calculate_area_diff(gauge_area, row.get(MERIT_AREA_COL)), 
+                    axis=1
+                )
+                valid_candidates = candidates.dropna(subset=['area_diff_percent'])
+                valid_automatches = valid_candidates[valid_candidates['area_diff_percent'].abs()<AREA_AUTO_MATCH_PERCENT]
+                
+                if not valid_automatches.empty:
+                    # Check topology:
+                    candidate_comids = set(valid_automatches[MERIT_ID_COL])
+                    candidate_nextdown_ids = set(valid_automatches['NextDownID'])
+                    source_reaches = candidate_comids - candidate_nextdown_ids
+                    num_sources = len(source_reaches)
+                    if num_sources > 1:
+                        # Pick between multiple valid automatches from different sources
+                        break
+                
+                    best_match = valid_automatches.loc[valid_automatches['area_diff_percent'].abs().idxmin()]
+                    best_diff = best_match['area_diff_percent']
+                    best_id = best_match[MERIT_ID_COL]
+                    
+                    comment = f"Auto-match area diff: {best_diff:.1f}%"
+                    auto_record_match(gauge[GAUGE_ID_COL], best_id, comment)
+                    continue 
+
+            # If we reached this point, the gauge was not auto-skipped
+            # or auto-matched. It needs manual review.
+            break # <-- EXIT THE WHILE LOOP
+
+    # If we jumped or went back, candidates/area are not set yet.
+    if jump_to or go_back:
+        if gauge is None: # Should be handled above, but as a safeguard
+             return "<h1>Gauge not found.</h1><a href='/'>Go back</a>"
+        gauge_area = gauge.get(GAUGE_AREA_COL, None)
+        candidates, _ = get_candidates(gauge.geometry, gauge_area) # We don't care about skip_reason here
+
+    # --- From here, the original code logic continues ---
+    # `gauge`, `gauge_area`, and `candidates` are now set correctly
+    # regardless of which path (jump, back, or auto-match-loop) was taken.
+
     # 3. Get WGS84 versions for mapping
     gauge_wgs84 = gdf_gauges_wgs84[gdf_gauges_wgs84[GAUGE_ID_COL] == gauge[GAUGE_ID_COL]].iloc[0]
     
@@ -344,7 +479,6 @@ def index():
 
     # 4. Prepare candidate data for the template
     colors = [mcolors.rgb2hex(cm.tab10(i % 10)) for i in range(len(candidates))]
-    gauge_area = gauge.get(GAUGE_AREA_COL, None)
     gauge_discharge = gauge.get(GAUGE_DISCHARGE_COL, None)
 
     candidate_list = []
@@ -355,9 +489,9 @@ def index():
 
         candidate_list.append({
             "id": row[MERIT_ID_COL],
-            "area": round(merit_area, 0),
-            "area_diff": round(area_diff, 2),
-            "runoff": round(runoff_mm_yr, 2),
+            "area": round(merit_area, 0) if merit_area else None,
+            "area_diff": area_diff,  # Keep as None or numeric
+            "runoff": runoff_mm_yr,  # Keep as None or numeric
             "color": colors[i],
             "other_prop": row.get("other_merit_prop", "N/A")
         })
@@ -395,7 +529,8 @@ def index():
         progress=progress,
         is_editing=go_back is not None,
         existing_comment=existing_comment,
-        existing_selection=existing_selection
+        existing_selection=existing_selection,
+        area_tolerance=AREA_TOLERANCE_PERCENT
     )
 
 @app.route("/submit", methods=["POST"])
