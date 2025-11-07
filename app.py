@@ -3,27 +3,24 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 
-import numpy as np
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import pandas as pd
 import geopandas as gpd
 import folium
 from tqdm import tqdm
-from flask import Flask, render_template, request, redirect, url_for
+from translate import Translator
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 
 
 
 # --- Configuration & Setup ---
-
-USE_MOCK_DATA = False  # <-- set to False when you want to load the real datasets
-
-
 # Data paths
-GAUGE_FILE = Path("./data/gauges.gpkg")
-MATCH_FILE = Path("./data/matches.csv")
+GAUGE_FILE = Path("./data/brana.gpkg")
 BACKUP_DIR = Path("./data/backups")
 MERIT_DIR = Path("/Users/Ted/Documents/MERIT-BASINS/")
+
+MATCH_FILE = GAUGE_FILE.with_suffix(".csv")
 
 # Define key column names
 GAUGE_ID_COL = "site_id"        
@@ -32,20 +29,19 @@ MERIT_AREA_COL = "uparea"
 GAUGE_AREA_COL = "area" 
 GAUGE_DISCHARGE_COL = "mean_discharge" 
 
-SEARCH_BUFFER_METERS = 5000 # Buffer around gauge to find candidates (in meters)
+SEARCH_BUFFER_METERS = 2000 # Buffer around gauge to find candidates (in meters)
 AREA_TOLERANCE_PERCENT = 100  #Filter candidates within this pct of gauge area
 AREA_AUTO_MATCH_PERCENT = 10 # Automatically match reaches by area if less than this pct
 
 BACKUP_INTERVAL = 50 
-
-# 5. Initialize Flask App
-app = Flask(__name__)
-
-# Create backup directory if it doesn't exist
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- Load Data (Run once on startup) ---
+# translate to english
+translator = Translator(to_lang="en")
 
+app = Flask(__name__)
+
+# --- Load Data (Run once on startup) ---
 print("Loading datasets...")
 try:
     gdf_gauges = gpd.read_file(GAUGE_FILE)
@@ -413,7 +409,7 @@ def index():
             # AUTO-SKIP: If no candidates found, record and move to next
             if candidates.empty and skip_reason:
                 auto_record_no_match(gauge[GAUGE_ID_COL], f"Auto-skipped: {skip_reason}")
-                continue  # <-- REPLACED REDIRECT
+                continue 
 
             # AUTO-MATCH: If we have gauge area we can attempt auto matching
             if gauge_area and gauge_area > 0 and not candidates.empty:
@@ -452,10 +448,6 @@ def index():
              return "<h1>Gauge not found.</h1><a href='/'>Go back</a>"
         gauge_area = gauge.get(GAUGE_AREA_COL, None)
         candidates, _ = get_candidates(gauge.geometry, gauge_area) # We don't care about skip_reason here
-
-    # --- From here, the original code logic continues ---
-    # `gauge`, `gauge_area`, and `candidates` are now set correctly
-    # regardless of which path (jump, back, or auto-match-loop) was taken.
 
     # 3. Get WGS84 versions for mapping
     gauge_wgs84 = gdf_gauges_wgs84[gdf_gauges_wgs84[GAUGE_ID_COL] == gauge[GAUGE_ID_COL]].iloc[0]
@@ -522,6 +514,7 @@ def index():
         "index.html",
         gauge=gauge.to_dict(),
         gauge_id=gauge[GAUGE_ID_COL],
+        gauge_name=gauge.get('name', 'N/A'),
         gauge_area=gauge_area if gauge_area is not None else "N/A",
         gauge_discharge=gauge_discharge if gauge_discharge is not None else "N/A",
         candidates=candidate_list,
@@ -533,6 +526,34 @@ def index():
         existing_selection=existing_selection,
         area_tolerance=AREA_TOLERANCE_PERCENT
     )
+
+
+@app.route("/translate/<gauge_id>")
+def translate_name(gauge_id):
+    """Endpoint to translate gauge name asynchronously."""
+    try:
+        gauge = get_gauge_by_id(gauge_id)
+        if gauge is None:
+            return jsonify({"error": "Gauge not found"}), 404
+        
+        gauge_name = gauge.get('name', '')
+        
+        # Skip translation if name is empty or already looks like English
+        if not gauge_name or gauge_name == 'N/A':
+            return jsonify({"translated": "N/A"})
+        
+        # Attempt translation
+        try:
+            translated = translator.translate(gauge_name)
+            return jsonify({"translated": translated})
+        except Exception as e:
+            print(f"Translation error for {gauge_id}: {e}")
+            return jsonify({"translated": f"[Translation failed: {gauge_name}]"})
+            
+    except Exception as e:
+        print(f"Error in translate endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
+    
 
 @app.route("/submit", methods=["POST"])
 def submit():
@@ -591,4 +612,4 @@ def submit():
 
 if __name__ == "__main__":
     print("Starting Flask app. Open http://127.0.0.1:5000 in your browser.")
-    app.run(debug=True, port=5000)
+    app.run(port=5000)

@@ -135,6 +135,26 @@
             font-weight: bold;
             margin-left: 8px;
         }
+        .translation-container {
+            margin-top: 5px;
+            padding: 8px;
+            background-color: #e8f5e9;
+            border-left: 3px solid #4caf50;
+            border-radius: 3px;
+        }
+        .translation-loading {
+            color: #666;
+            font-style: italic;
+        }
+        .translation-result {
+            color: #2e7d32;
+            font-weight: 500;
+        }
+        .translation-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-right: 5px;
+        }
     </style>
 </head>
 <body>
@@ -161,7 +181,13 @@
         <h3>Gauge Properties</h3>
         <ul>
             <li><b>ID:</b> {{ gauge_id }}</li>
-            <li><b>Name:</b> {{ gauge.get('name', 'N/A') }}</li>
+            <li>
+                <b>Name:</b> {{ gauge_name }}
+                <div class="translation-container" id="translation-container">
+                    <span class="translation-label">🌐 English:</span>
+                    <span class="translation-loading" id="translation-text">Loading translation...</span>
+                </div>
+            </li>
             <li><b>Reported Area:</b> {{ gauge_area }}</li>
             <li><b>Mean Discharge (m³/s):</b> {{ gauge_discharge }}</li>
         </ul>
@@ -287,6 +313,29 @@
     </div>
 
     <script>
+        // Fetch translation asynchronously
+        (function() {
+            const gaugeId = "{{ gauge_id }}";
+            const translationText = document.getElementById('translation-text');
+            const translationContainer = document.getElementById('translation-container');
+            
+            fetch(`/translate/${gaugeId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.translated && data.translated !== "N/A") {
+                        translationText.textContent = data.translated;
+                        translationText.className = 'translation-result';
+                    } else {
+                        translationContainer.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Translation error:', error);
+                    translationText.textContent = 'Translation unavailable';
+                    translationText.className = 'translation-loading';
+                });
+        })();
+
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
             // Don't trigger shortcuts if user is typing in a text input or textarea
