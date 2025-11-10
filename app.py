@@ -13,10 +13,9 @@ from translate import Translator
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 
 
-
 # --- Configuration & Setup ---
 # Data paths
-GAUGE_FILE = Path("./data/brana.gpkg")
+GAUGE_FILE = Path("./data/krwamis.gpkg")
 BACKUP_DIR = Path("./data/backups")
 MERIT_DIR = Path("/Users/Ted/Documents/MERIT-BASINS/")
 
