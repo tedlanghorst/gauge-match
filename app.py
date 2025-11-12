@@ -31,6 +31,10 @@ SEARCH_BUFFER_METERS = 2000
 AREA_TOLERANCE_PERCENT = 100
 AREA_AUTO_MATCH_PERCENT = 10
 
+# DELETES entries in the match file that are noted as auto-matches
+# A backup file is created when this occurs in case you need to undo
+REDO_AUTOMATCH = False 
+
 BACKUP_INTERVAL = 50 
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -181,12 +185,37 @@ def get_matched_data(match_file):
 
     except pd.errors.EmptyDataError:
         return pd.DataFrame(columns=new_cols)
+    
+def reset_automatches(match_file):
+    """Removes all auto-matched entries from the match file."""
+    if not match_file.exists():
+        return
+    
+    create_backup(match_file)  # Creates timestamped backup
+    
+    df_matches = get_matched_data(match_file)
+    original_count = len(df_matches)
+    
+    # Remove AUTO-MATCH status entries
+    df_matches = df_matches[df_matches['status'] != 'AUTO-MATCH']
+    
+    # Remove entries with auto-match comments (for older versions)
+    auto_match_pattern = r'Auto-match'
+    df_matches = df_matches[~df_matches['comments'].str.contains(auto_match_pattern, case=False, na=False)]
+    
+    removed_count = original_count - len(df_matches)
+    
+    df_matches.to_csv(match_file, index=False, float_format='%.0f')
+    
+    if removed_count > 0:
+        print(f"  Removed {removed_count} auto-match entries from {match_file.name}")
 
 def get_matched_ids(match_file):
     """Returns a set of gauge IDs that are *already in the match file*."""
     df_matches = get_matched_data(match_file)
     # Exclude the ids that are in the file but need review
     df_matches = df_matches[df_matches['status'] != 'NEEDS_REVIEW']
+
     return set(df_matches[GAUGE_ID_COL].unique())
 
 
@@ -656,18 +685,20 @@ def match_index():
                     axis=1
                 )
                 valid_candidates = candidates.dropna(subset=['area_diff_percent'])
-                valid_automatches = valid_candidates[valid_candidates['area_diff_percent'].abs() < AREA_AUTO_MATCH_PERCENT]
+                valid_automatches = valid_candidates[valid_candidates['area_diff_percent'].abs() < AREA_AUTO_MATCH_PERCENT].reset_index(drop=True)
+
                 
                 if not valid_automatches.empty:
                     # Check that the closest gauge is also the best area match
-                    if valid_automatches.idxmin('area_diff_percent') != 0:
+                    # The matches are sorted by distance when we get them from get_candidates
+                    if valid_automatches['area_diff_percent'].abs().idxmin() != 0:
                         break # manually review this gauge
 
                     # Check for confluences
                     candidate_comids = set(valid_automatches[MERIT_ID_COL])
                     candidate_nextdown_ids = set(valid_automatches['NextDownID'])
                     source_reaches = candidate_comids - candidate_nextdown_ids
-                    if len(source_reaches) >= 1:
+                    if len(source_reaches) > 1:
                         break # manually review this gauge
 
                     # Auto match
@@ -989,7 +1020,7 @@ def submit_dedup():
         elif action == "remove":
             new_status = "REMOVED_DUPLICATE"
             new_merit_id = pd.NA
-            
+
             new_comment = f"Removed from COMID {reach_id_str} during deduplication"
 
         new_row = pd.DataFrame({
@@ -1042,6 +1073,15 @@ def translate_name(gauge_id):
 if __name__ == "__main__":
     try:
         load_merit_data()
+
+        # One-time cleanup of auto-matches
+        if REDO_AUTOMATCH:
+            print("\nRemoving old auto-matches...")
+            for file_stem in get_available_gauge_files():
+                match_file = DATA_DIR / f"{file_stem}.csv"
+                reset_automatches(match_file)
+            print("Auto-match reset complete.\n")
+
         print("\nStarting Flask app. Open http://127.0.0.1:5000 in your browser.")
         app.run(port=5000, debug=True)
     except Exception as e:
