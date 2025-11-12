@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MERIT Hydro Matcher - Deduplication Mode</title>
+    <style>
+        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; }
+        #sidebar { width: 40%; padding: 20px; overflow-y: auto; }
+        #map-container { width: 60%; height: 100vh; }
+        #map-container .folium-map { width: 100%; height: 100%; }
+        h1, h2, h3 { color: #333; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .form-options { margin: 20px 0; }
+        .gmaps-link {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 15px;
+            background-color: #4285F4;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+        .color-box {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            margin-right: 6px;
+        }
+        .progress-bar {
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .progress-bar-fill {
+            height: 25px;
+            background-color: #ff9800;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .progress-text {
+            margin-top: 5px;
+            font-size: 0.9em;
+            color: #666;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .btn-primary {
+            background-color: #ff9800;
+            color: white;
+        }
+        .btn-secondary {
+            background-color: #2196F3;
+            color: white;
+        }
+        .btn-link {
+            background-color: #78909c;
+            color: white;
+        }
+        .positive-diff { color: #d32f2f; }
+        .negative-diff { color: #388e3c; }
+        .mode-switcher {
+            margin-bottom: 15px;
+            padding: 15px;
+            background-color: #fff3e0;
+            border-radius: 5px;
+        }
+        .mode-switcher-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .mode-switcher-top span {
+            background-color: #ff9800;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-weight: bold;
+        }
+        .mode-switcher-top div {
+            display: flex;
+            gap: 10px;
+        }
+        .mode-switcher-bottom {
+            margin-top: 12px;
+            font-size: 0.9em;
+            color: #f57c00;
+        }
+        .dedup-notice {
+            background-color: #fff3cd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border-left: 4px solid #ff9800;
+        }
+        .shortcut-indicator {
+            display: inline-block;
+            background-color: #ff9800;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        .keyboard-shortcuts {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #fff3e0;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        .keyboard-shortcuts h4 {
+            margin-top: 0;
+            color: #f57c00;
+        }
+        .keyboard-shortcuts code {
+            background-color: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        /* New styling for the action cell */
+        .action-cell {
+            vertical-align: top;
+        }
+        .action-cell div {
+            margin-bottom: 5px;
+        }
+        .action-cell label {
+            margin-left: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            color: #333;
+        }
+        .action-cell input {
+            cursor: pointer;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <div class="mode-switcher">
+            <div class="mode-switcher-top">
+                <span class="mode-badge">DEDUPLICATION MODE</span>
+                <div>
+                    <button onclick="window.location.href='/switch_mode/match'" class="btn btn-secondary">
+                        ← Switch to Matching
+                    </button>
+                    <button onclick="window.location.href='/'" class="btn btn-link">
+                        Change File
+                    </button>
+                </div>
+            </div>
+            <div class="mode-switcher-bottom">
+                <strong>File:</strong> {{ current_file }}
+            </div>
+        </div>
+
+        <div class="progress-bar">
+            <div class="progress-bar-fill" style="width: {{ 0 if progress.remaining == 0 else 100 }}%;">
+                {% if progress.remaining == 0 %}Complete!{% else %}{{ progress.remaining }} duplicate reaches remaining{% endif %}
+            </div>
+            <div class="progress-text">
+                Reviewing reaches with multiple gauges
+            </div>
+        </div>
+
+        <div class="dedup-notice">
+            <strong>📍 Review Duplicate Matches:</strong> For each gauge, select an action.
+        </div>
+        
+        <a href="{{ gmaps_link }}" class="gmaps-link" target="_blank">Open in Google Maps</a>
+        
+        <h3>MERIT Reach Properties</h3>
+        <ul>
+            <li><b>MERIT ID:</b> {{ reach_id }}</li>
+            <li><b>Area (km²):</b> {{ reach_area }}</li>
+        </ul>
+        
+        <hr>
+
+        <h3>Matched Gauges (Select Action)</h3>
+        <form action="/submit_dedup" method="POST" class="form-options" id="dedupForm">
+            <input type="hidden" name="reach_id" value="{{ reach_id }}">
+            <input type="hidden" name="gauge_ids_on_page" value="{{ gauges|map(attribute='id')|join(',') }}">
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Action</th>
+                        <th>Gauge ID</th>
+                        <th>Name</th>
+                        <th>Gauge Area</th>
+                        <th>Discharge (m³/s)</th>
+                        <th>Discharge Count</th>
+                        <th>Min Date</th>
+                        <th>Max Date</th>
+                        <th>Runoff (mm/yr)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for g in gauges %}
+                    <tr style="background-color: {{ g.color }}33;" data-gauge-index="{{ loop.index }}" data-gauge-id="{{ g.id }}">
+                        <td class="action-cell">
+                            <span class="shortcut-indicator">{{ loop.index }}</span>
+                            <div>
+                                <input type="radio" name="action_{{ g.id }}" id="keep_{{ g.id }}" value="keep" checked>
+                                <label for="keep_{{ g.id }}">Keep</label>
+                            </div>
+                            <div>
+                                <input type="radio" name="action_{{ g.id }}" id="remove_{{ g.id }}" value="remove">
+                                <label for="remove_{{ g.id }}">Remove</label>
+                            </div>
+                            <div>
+                                <input type="radio" name="action_{{ g.id }}" id="review_{{ g.id }}" value="review">
+                                <label for="review_{{ g.id }}">Review</label>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="color-box" style="background-color: {{ g.color }};"></div>
+                            {{ g.id }}
+                        </td>
+                        <td>{{ g.name }}</td>
+                        <td>{{ g.area }}</td>
+                        <td>{{ g.discharge }}</td>
+                        <td>{{ g.discharge_count }}</td>
+                        <td>{{ g.min_date }}</td>
+                        <td>{{ g.max_date }}</td>
+                        <td>{{ g.runoff|round(1) if g.runoff is not none else "N/A" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            
+            <hr>
+            
+            <div style="margin-top: 20px;">
+                <button type="submit" class="btn btn-primary">
+                    Save and Next
+                    <span class="shortcut-indicator">Enter</span>
+                </button>
+            </div>
+        </form>
+
+        <div class="keyboard-shortcuts">
+            <h4>⌨️ Keyboard Shortcuts</h4>
+            <ul style="margin: 5px 0; padding-left: 20px;">
+                <li><code>1-9</code>: Cycle action (Keep/Remove/Review) for row</li>
+                <li><code>K</code>: Set all gauges to <strong>K</strong>eep</li>
+                <li><code>R</code>: Set all gauges to <strong>R</strong>emove</li>
+                <li><code>V</code>: Set all gauges to Re<strong>v</strong>iew</li>
+                <li><code>Enter</code>: Submit</li>
+            </ul>
+        </div>
+    </div>
+
+    <div id="map-container">
+        {{ map_html|safe }}
+    </div>
+
+    <script>
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            
+            // Number keys (1-9) for cycling actions
+            if (e.key >= '1' && e.key <= '9') {
+                e.preventDefault();
+                const gaugeNum = parseInt(e.key);
+                const row = document.querySelector('tr[data-gauge-index="' + gaugeNum + '"]');
+                if (!row) return;
+
+                const gaugeId = row.dataset.gaugeId;
+                const radios = document.querySelectorAll('input[name="action_' + gaugeId + '"]');
+                if (radios.length === 0) return;
+
+                let currentIndex = -1;
+                for (let i = 0; i < radios.length; i++) {
+                    if (radios[i].checked) {
+                        currentIndex = i;
+                        break;
+                    }
+                }
+                
+                // Cycle to the next one
+                const nextIndex = (currentIndex + 1) % radios.length;
+                radios[nextIndex].checked = true;
+
+                // Flash the row
+                row.style.transition = 'background-color 0.2s';
+                const originalBg = row.style.backgroundColor;
+                row.style.backgroundColor = '#ffeb3b';
+                setTimeout(() => row.style.backgroundColor = originalBg, 200);
+            }
+            
+            // K for "Keep All"
+            if (e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                document.querySelectorAll('input[value="keep"]').forEach(rb => rb.checked = true);
+            }
+            
+            // R for "Remove All"
+            if (e.key.toLowerCase() === 'r') {
+                e.preventDefault();
+                document.querySelectorAll('input[value="remove"]').forEach(rb => rb.checked = true);
+            }
+
+            // V for "Review All"
+            if (e.key.toLowerCase() === 'v') {
+                e.preventDefault();
+                document.querySelectorAll('input[value="review"]').forEach(rb => rb.checked = true);
+            }
+            
+            // Enter to submit
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('dedupForm').submit();
+            }
+        });
+    </script>
+
+</body>
+</html>

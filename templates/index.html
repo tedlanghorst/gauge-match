@@ -2,402 +2,136 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>MERIT Hydro Matcher</title>
+    <title>MERIT Hydro Matcher - Setup</title>
     <style>
-        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; }
-        #sidebar { width: 40%; padding: 20px; overflow-y: auto; }
-        #map-container { width: 60%; height: 100vh; }
-        #map-container .folium-map { width: 100%; height: 100%; }
-        h1, h2, h3 { color: #333; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        .form-options { margin: 20px 0; }
-        .form-options label { display: block; margin: 10px 0; font-size: 1.1em; }
-        .gmaps-link {
-            display: inline-block;
-            margin-top: 10px;
-            padding: 10px 15px;
-            background-color: #4285F4;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
+        body { 
+            font-family: sans-serif; 
+            display: grid;
+            place-items: center;
+            min-height: 90vh;
+            background-color: #f4f7f6;
         }
-        .color-box {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border-radius: 3px;
-            margin-right: 6px;
+        .container {
+            width: 90%;
+            max-width: 600px;
+            padding: 40px;
+            background-color: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
         }
-        .progress-bar {
-            margin: 15px 0;
-            padding: 10px;
-            background-color: #f5f5f5;
-            border-radius: 5px;
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-top: 0;
         }
-        .progress-bar-fill {
-            height: 25px;
-            background-color: #4CAF50;
-            border-radius: 3px;
-            transition: width 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
+        .form-group {
+            margin-bottom: 25px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 1.1em;
             font-weight: bold;
+            margin-bottom: 10px;
+            color: #555;
         }
-        .progress-text {
-            margin-top: 5px;
-            font-size: 0.9em;
-            color: #666;
-        }
-        .comments-box {
+        .form-group select {
             width: 100%;
-            min-height: 60px;
-            padding: 8px;
-            margin: 10px 0;
-            font-family: sans-serif;
-            font-size: 14px;
+            padding: 12px;
+            font-size: 16px;
             border: 1px solid #ddd;
-            border-radius: 3px;
+            border-radius: 5px;
+            box-sizing: border-box; /* Important for padding to work */
         }
-        .button-row {
+        .mode-selection {
             display: flex;
-            gap: 10px;
-            margin-top: 15px;
+            gap: 15px;
+        }
+        .mode-selection label {
+            flex: 1;
+            display: block;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border: 2px solid #eee;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .mode-selection input[type="radio"] {
+            display: none; /* Hide the radio button */
+        }
+        .mode-selection input[type="radio"]:checked + label {
+            border-color: #3f51b5;
+            background-color: #e8eaf6;
+            box-shadow: 0 4px 10px rgba(63,81,181,0.2);
+        }
+        .mode-selection h4 {
+            margin: 0 0 5px 0;
+            color: #333;
+        }
+        .mode-selection p {
+            margin: 0;
+            font-size: 0.9em;
+            color: #777;
         }
         .btn {
-            padding: 10px 20px;
+            display: block;
+            width: 100%;
+            padding: 15px;
             border: none;
             border-radius: 5px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 18px;
             font-weight: bold;
-        }
-        .btn-primary {
             background-color: #4CAF50;
             color: white;
+            transition: background-color 0.2s ease;
         }
-        .btn-secondary {
-            background-color: #2196F3;
-            color: white;
-        }
-        .btn-warning {
-            background-color: #ff9800;
-            color: white;
-        }
-        .jump-to-form {
-            margin-top: 20px;
-            padding: 15px;
-            background-color: #f9f9f9;
-            border-radius: 5px;
-        }
-        .jump-to-form input {
-            padding: 8px;
-            width: 200px;
-            border: 1px solid #ddd;
-            border-radius: 3px;
-        }
-        .positive-diff { color: #d32f2f; }
-        .negative-diff { color: #388e3c; }
-        .editing-notice {
-            background-color: #fff3cd;
-            padding: 10px;
-            border-radius: 5px;
-            margin-bottom: 15px;
-            border-left: 4px solid #ffc107;
-        }
-        .keyboard-shortcuts {
-            margin-top: 20px;
-            padding: 15px;
-            background-color: #e3f2fd;
-            border-radius: 5px;
-            font-size: 0.9em;
-        }
-        .keyboard-shortcuts h4 {
-            margin-top: 0;
-            color: #1976d2;
-        }
-        .keyboard-shortcuts code {
-            background-color: #fff;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-weight: bold;
-        }
-        .shortcut-indicator {
-            display: inline-block;
-            background-color: #1976d2;
-            color: white;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.85em;
-            font-weight: bold;
-            margin-left: 8px;
-        }
-        .translation-container {
-            margin-top: 5px;
-            padding: 8px;
-            background-color: #e8f5e9;
-            border-left: 3px solid #4caf50;
-            border-radius: 3px;
-        }
-        .translation-loading {
-            color: #666;
-            font-style: italic;
-        }
-        .translation-result {
-            color: #2e7d32;
-            font-weight: 500;
-        }
-        .translation-label {
-            font-size: 0.85em;
-            color: #666;
-            margin-right: 5px;
+        .btn:hover {
+            background-color: #45a049;
         }
     </style>
 </head>
 <body>
-
-    <div id="sidebar">
-        <!-- Progress Bar -->
-        <div class="progress-bar">
-            <div class="progress-bar-fill" style="width: {{ progress.percent }}%;">
-                {{ progress.percent }}%
-            </div>
-            <div class="progress-text">
-                {{ progress.matched }} of {{ progress.total }} matched ({{ progress.remaining }} remaining)
-            </div>
-        </div>
-
-        {% if is_editing %}
-        <div class="editing-notice">
-            <strong>⚠️ Editing Mode:</strong> You are editing a previous match. Your changes will update the existing entry.
-        </div>
-        {% endif %}
+    <div class="container">
+        <h1>MERIT Hydro Matcher</h1>
         
-        <a href="{{ gmaps_link }}" class="gmaps-link" target="_blank">Open in Google Maps</a>
-        
-        <h3>Gauge Properties</h3>
-        <ul>
-            <li><b>ID:</b> {{ gauge_id }}</li>
-            <li>
-                <b>Name:</b> {{ gauge_name }}
-                <div class="translation-container" id="translation-container">
-                    <span class="translation-label">🌐 English:</span>
-                    <span class="translation-loading" id="translation-text">Loading translation...</span>
+        <form action="/" method="POST">
+            <div class="form-group">
+                <label for="file-selector">1. Select a Gauge File</label>
+                <select id="file-selector" name="gauge_file" required>
+                    <option value="" disabled {% if not current_file %}selected{% endif %}>
+                        -- Please choose a file --
+                    </option>
+                    {% for file in available_files %}
+                    <option value="{{ file }}" {% if file == current_file %}selected{% endif %}>
+                        {{ file }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>2. Choose a Mode</label>
+                <div class="mode-selection">
+                    <input type="radio" id="mode-match" name="mode" value="match" 
+                        {% if current_mode == 'match' %}checked{% endif %} required>
+                    <label for="mode-match">
+                        <h4>Match</h4>
+                        <p>Manually match gauges to MERIT reaches.</p>
+                    </label>
+                    
+                    <input type="radio" id="mode-dedup" name="mode" value="dedup"
+                        {% if current_mode == 'dedup' %}checked{% endif %} required>
+                    <label for="mode-dedup">
+                        <h4>Deduplicate</h4>
+                        <p>Review reaches with multiple gauges.</p>
+                    </label>
                 </div>
-            </li>
-            <li><b>Reported Area:</b> {{ gauge_area }}</li>
-            <li><b>Mean Discharge (m³/s):</b> {{ gauge_discharge }}</li>
-        </ul>
-        
-        <hr>
-
-        <h3>Potential MERIT Matches</h3>
-        <form action="/submit" method="POST" class="form-options" id="matchForm">
-            <input type="hidden" name="gauge_id" value="{{ gauge_id }}">
-            <input type="hidden" name="is_editing" value="{{ 'true' if is_editing else 'false' }}">
-            
-            {% if candidates %}
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Key</th>
-                            <th>MERIT ID</th>
-                            <th>Area (km²)</th>
-                            <th>% Diff</th>
-                            <th>Runoff (mm/yr)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for c in candidates %}
-                        <tr style="background-color: {{ c.color }}33;" data-shortcut="{{ loop.index }}">
-                            <td>
-                                <input type="radio" name="selection" value="{{ c.id }}" id="candidate_{{ loop.index }}"
-                                    {% if existing_selection and existing_selection == c.id %}checked
-                                    {% elif not existing_selection and loop.first %}checked
-                                    {% endif %}
-                                    >
-                                <label for="candidate_{{ loop.index }}">
-                                    <span class="shortcut-indicator">{{ loop.index }}</span>
-                                </label>
-                            </td>
-                            <td>
-                                <div class="color-box" style="background-color: {{ c.color }};"></div>
-                                {{ c.id }}
-                            </td>
-                            <td>{{ c.area|round(0) if c.area is not none else "N/A" }}</td>
-                            <td>
-                                {% if c.area_diff is not none %}
-                                    <span class="{% if c.area_diff > 0 %}positive-diff{% else %}negative-diff{% endif %}">
-                                        {{ '%+.1f' | format(c.area_diff) }}%
-                                    </span>
-                                {% else %}
-                                    N/A
-                                {% endif %}
-                            </td>
-                            <td>{{ c.runoff|round(1) if c.runoff is not none else "N/A" }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                <hr>
-                <label>
-                    <input type="radio" name="selection" value="NONE" id="none_option"
-                        {% if existing_selection == 'NONE' %}checked{% endif %}
-                        {% if not existing_selection %}required{% endif %}>
-                    <b>No match</b>
-                    <span class="shortcut-indicator">N</span>
-                </label>
-            {% else %}
-                <p>No candidates found within the search buffer.</p>
-                <label>
-                    <input type="radio" name="selection" value="NO_CANDIDATES" id="no_candidates_option" checked>
-                    <b>No Candidates Found</b>
-                </label>
-            {% endif %}
-            
-            <label>
-                <input type="radio" name="selection" value="SKIP" id="skip_option"
-                    {% if existing_selection == 'SKIP' %}checked{% endif %}
-                >
-                <b>Skip</b>
-                <span class="shortcut-indicator">S</span>
-            </label>
-            
-            <hr>
-            
-            <label for="comments"><b>Comments (optional):</b></label>
-            <textarea name="comments" id="comments" class="comments-box" placeholder="Add any notes about this match...">{{ existing_comment }}</textarea>
-            
-            <div class="button-row">
-                <button type="submit" class="btn btn-primary">
-                    {% if is_editing %}Update Match{% else %}Save and Next{% endif %}
-                    <span class="shortcut-indicator">Enter</span>
-                </button>
-                
-                {% if not is_editing %}
-                <button type="button" class="btn btn-secondary" onclick="window.location.href='/?back=true'">
-                    ← Back
-                    <span class="shortcut-indicator">B</span>
-                </button>
-                {% endif %}
             </div>
+
+            <button type="submit" class="btn">Start</button>
         </form>
-
-        <!-- Keyboard Shortcuts Help -->
-        <div class="keyboard-shortcuts">
-            <h4>⌨️ Keyboard Shortcuts</h4>
-            <ul style="margin: 5px 0; padding-left: 20px;">
-                <li><code>1-9</code>: Select candidate by number</li>
-                <li><code>N</code>: None of these are correct</li>
-                <li><code>S</code>: Skip this gauge</li>
-                <li><code>Enter</code>: Submit (when not in comment field)</li>
-                <li><code>B</code>: Go back to previous</li>
-            </ul>
-        </div>
-
-        <!-- Jump To Section -->
-        <div class="jump-to-form">
-            <h4>Jump to Specific Gauge:</h4>
-            <form action="/" method="GET" style="display: flex; gap: 10px;">
-                <input type="text" name="jump_to" placeholder="Enter site_id" required>
-                <button type="submit" class="btn btn-warning">Jump</button>
-            </form>
-        </div>
     </div>
-
-    <div id="map-container">
-        {{ map_html|safe }}
-    </div>
-
-    <script>
-        // Fetch translation asynchronously
-        (function() {
-            const gaugeId = "{{ gauge_id }}";
-            const translationText = document.getElementById('translation-text');
-            const translationContainer = document.getElementById('translation-container');
-            
-            fetch(`/translate/${gaugeId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.translated && data.translated !== "N/A") {
-                        translationText.textContent = data.translated;
-                        translationText.className = 'translation-result';
-                    } else {
-                        translationContainer.style.display = 'none';
-                    }
-                })
-                .catch(error => {
-                    console.error('Translation error:', error);
-                    translationText.textContent = 'Translation unavailable';
-                    translationText.className = 'translation-loading';
-                });
-        })();
-
-        // Keyboard shortcuts
-        document.addEventListener('keydown', function(e) {
-            // Don't trigger shortcuts if user is typing in a text input or textarea
-            if (e.target.tagName === 'INPUT' && e.target.type === 'text') {
-                return;
-            }
-            if (e.target.tagName === 'TEXTAREA' && e.key !== 'Enter') {
-                return;
-            }
-
-            // Number keys (1-9) for selecting candidates
-            if (e.key >= '1' && e.key <= '9') {
-                e.preventDefault();
-                const candidateNum = parseInt(e.key);
-                const radio = document.getElementById('candidate_' + candidateNum);
-                if (radio) {
-                    radio.checked = true;
-                    // Flash the row to show selection
-                    const row = radio.closest('tr');
-                    if (row) {
-                        row.style.transition = 'background-color 0.2s';
-                        const originalBg = row.style.backgroundColor;
-                        row.style.backgroundColor = '#ffeb3b';
-                        setTimeout(() => row.style.backgroundColor = originalBg, 200);
-                    }
-                }
-            }
-            
-            // N for "None of these are correct"
-            if (e.key.toLowerCase() === 'n' && e.target.id !== 'comments') {
-                e.preventDefault();
-                const noneRadio = document.getElementById('none_option');
-                if (noneRadio) {
-                    noneRadio.checked = true;
-                }
-            }
-            
-            // S for "Skip"
-            if (e.key.toLowerCase() === 's' && e.target.id !== 'comments') {
-                e.preventDefault();
-                const skipRadio = document.getElementById('skip_option');
-                if (skipRadio) {
-                    skipRadio.checked = true;
-                }
-            }
-            
-            // Enter to submit (only if not in textarea)
-            if (e.key === 'Enter' && e.target.id !== 'comments') {
-                e.preventDefault();
-                document.getElementById('matchForm').submit();
-            }
-            
-            // B for Back
-            if (e.key.toLowerCase() === 'b' && e.target.id !== 'comments') {
-                e.preventDefault();
-                const backButton = document.querySelector('.btn-secondary');
-                if (backButton) {
-                    window.location.href = '/?back=true';
-                }
-            }
-        });
-    </script>
-
 </body>
 </html>
